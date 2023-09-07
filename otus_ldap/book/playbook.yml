@@ -1,0 +1,136 @@
+- name: LDAP install
+  hosts: all
+  become: yes
+  tasks:
+  - name: install softs on CentOS
+    ansible.builtin.yum:
+      name:
+        - vim
+        - chrony
+      state: present
+      update_cache: true
+  
+  - name: Start firewalld service
+    service:
+      name: firewalld
+      state: started
+      enabled: true  
+
+
+
+
+  - name: Permit freeipa networking
+    firewalld:
+      service: "{{ item }}"
+      permanent: yes
+      immediate: yes
+      state: enabled
+    loop:
+      - ntp
+      - http
+      - https
+      - ldap
+      - ldaps
+      - kerberos
+      - kpasswd
+      - dns
+
+
+  - name: turn off SElinux
+    selinux:
+      state: disabled
+  
+  - name: Turn off SElinux before now
+    shell: setenforce 0
+
+  - name: Set up timezone
+    timezone:
+      name: "Asia/Novosibirsk"
+  
+  - name: Start chronyd service
+    service:
+      name: chronyd
+      state: restarted
+      enabled: true
+  
+  - name: /etc/hosts
+    ansible.builtin.copy:
+      src: hosts
+      dest: /etc/hosts
+      owner: root
+      group: root
+      mode: 0644
+  
+
+- name: FreeIPA Server conf
+  hosts: ipa.otus.lan
+  become: yes
+  tasks:
+
+  - name: Upgrade NSS
+    ansible.builtin.yum:
+      name: 'nss'
+      state: latest
+
+  - name: Packages
+    ansible.builtin.yum:
+      name:
+        - ipa-server
+        - ipa-server-dns  
+
+  - name: Remove freeipa-server config
+    command: |
+      ipa-server-install -U \
+      --uninstall \
+
+  - name: configure freeipa
+    command: |
+      ipa-server-install -U \
+      -r OTUS.LAN \
+      -n otus.lan \
+      -p otusotus \
+      -a otusotus \
+      --hostname=ipa.otus.lan \
+      --ip-address=192.168.57.10 \
+      --mkhomedir \
+      --no-ntp \
+
+
+  - ipa_user:
+      name: neuronmaster
+      givenname: Neuronmaster
+      sn: TestSN
+      password: qwerty1
+      loginshell: /bin/bash
+      ipa_host: ipa.otus.lan
+      ipa_user: admin
+      ipa_pass: otus
+
+        
+
+- name: Config Clients
+  hosts: client1.otus.lan,client2.otus.lan
+  become: yes
+  tasks:
+
+  - name: Upgrade client NSS
+    ansible.builtin.yum:
+      name: 'nss'
+      state: latest
+  - name: install module ipa-client
+    ansible.builtin.yum:
+      name:
+        - freeipa-client
+      state: present
+      update_cache: true
+
+  - name: configure ipa-client
+    command: |
+      ipa-client-install -U \
+      --principal admin@OTUS.LAN \
+      --password otus \
+      --server ipa.otus.lan \
+      --domain otus.lan \
+      --realm OTUS.LAN \
+      --mkhomedir \
+      --force-join
